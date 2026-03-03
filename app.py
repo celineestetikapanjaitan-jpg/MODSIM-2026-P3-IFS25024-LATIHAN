@@ -79,13 +79,24 @@ class SistemPiketDES:
         return random.uniform(mn, mx)
 
     def _proses_angkat(self):
+        """Kumpulkan ompreng dan angkat per batch.
+        Jika sudah menunggu dan antrian tidak kosong tapi < OMPRENG_PER_TRIP,
+        angkat saja sisa yang ada (trip terakhir).
+        """
         trip = 0
-        while True:
+        ompreng_diangkat = 0
+        total_target = self.cfg.TOTAL_MEJA * self.cfg.MAHASISWA_PER_MEJA
+
+        while ompreng_diangkat < total_target:
             batch = []
-            # Kumpulkan batch (bisa kurang dari OMPRENG_PER_TRIP jika sisa)
-            for _ in range(self.cfg.OMPRENG_PER_TRIP):
+            sisa_belum_diangkat = total_target - ompreng_diangkat
+            ukuran_batch = min(self.cfg.OMPRENG_PER_TRIP, sisa_belum_diangkat)
+
+            # Kumpulkan tepat ukuran_batch ompreng
+            for _ in range(ukuran_batch):
                 oid = yield self.antrian_angkat.get()
                 batch.append(oid)
+
             trip += 1
             t0 = self.env.now
             self.stats['q_angkat'].append({
@@ -95,8 +106,11 @@ class SistemPiketDES:
                 yield req
                 dur = self.rnd(self.cfg.MIN_ANGKAT, self.cfg.MAX_ANGKAT)
                 yield self.env.timeout(dur)
+
+            ompreng_diangkat += len(batch)
             self.stats['trip_log'].append({
-                'trip': trip, 'mulai': t0, 'selesai': self.env.now, 'dur': dur, 'isi': len(batch)
+                'trip': trip, 'mulai': t0, 'selesai': self.env.now,
+                'dur': dur, 'isi': len(batch)
             })
             for oid in batch:
                 if oid in self._ev_angkat:
@@ -356,6 +370,12 @@ def main():
 
         st.markdown("---")
         st.markdown("### ⏱️ Waktu Layanan (menit)")
+
+        # Nilai default — akan ditimpa oleh input di dalam expander jika dibuka
+        mn_lauk,   mx_lauk   = 0.33, 0.50
+        mn_angkat, mx_angkat = 0.33, 1.00
+        mn_nasi,   mx_nasi   = 0.33, 0.50
+
         with st.expander("🔧 Ubah rentang waktu"):
             ca, cb = st.columns(2)
             with ca:
@@ -366,9 +386,6 @@ def main():
                 mx_lauk   = st.number_input("Max Lauk",   0.10, 5.0, 0.50, 0.01, format="%.2f")
                 mx_angkat = st.number_input("Max Angkat", 0.10, 5.0, 1.00, 0.01, format="%.2f")
                 mx_nasi   = st.number_input("Max Nasi",   0.10, 5.0, 0.50, 0.01, format="%.2f")
-            mn_lauk, mx_lauk     = 0.33, 0.50
-            mn_angkat, mx_angkat = 0.33, 1.00
-            mn_nasi, mx_nasi     = 0.33, 0.50
 
         # Estimasi real-time
         est_lauk   = (total_ompr / p_lauk)   * (mn_lauk   + mx_lauk)   / 2
